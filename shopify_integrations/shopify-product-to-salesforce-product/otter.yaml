@@ -62,7 +62,7 @@ env:
   SALESFORCE_API_VERSION: "62.0"
   SALESFORCE_AUTH: client_credentials
 
-  # Where customers land, and the unique External ID field used to upsert.
+  # Where product variants land, and the unique External ID field used to upsert.
   SALESFORCE_OBJECT: Product2 
   SALESFORCE_EXTERNAL_ID_FIELD: Shopify_Variant_Id__c
 

@@ -38,15 +38,16 @@ no install step and `otter validate` checks that it exists:
 python:
   executable: python3
   path:
-    - ../../lib/python
+    - ../lib/python
 ```
 
 `python.path` entries may also be absolute. Ordering on `PYTHONPATH` is: the
 runtime SDK first (so `import otter` always resolves to the daemon's own copy),
 then these directories, then whatever the operator already had.
 
-Alternatively, install it (`pip install ./lib/python`) or add the directory to
-`PYTHONPATH` yourself — the package has no third-party dependencies either way.
+Alternatively, install it (`pip install shopify_integrations/lib/python`) or add
+the directory to `PYTHONPATH` yourself — the package has no third-party
+dependencies either way.
 
 ## What is in here
 
@@ -83,7 +84,9 @@ shape.
 ## Tests
 
 ```bash
-PYTHONPATH=lib/python python3 -m unittest discover -s lib/python/tests
+# from the repository root
+PYTHONPATH=shopify_integrations/lib/python \
+    python3 -m unittest discover -s shopify_integrations/lib/python/tests
 ```
 
 These cover the pure logic and the request shapes the clients must produce. The

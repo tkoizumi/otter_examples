@@ -4,11 +4,13 @@ Example [Otter](https://github.com/tkoizumi/otter) integrations: small, runnable
 and commented more heavily than production code would be, because the point is
 to be read as much as run.
 
-Today there is one.
+Today there are two. They share the same Shopify and Salesforce clients, the same
+`otter.env`, and the same daemon, and neither knows the other exists.
 
 | Integration | What it does |
 | --- | --- |
 | [`shopify_customer_to_salesforce_contact`](shopify_integrations/shopify_customer_to_salesforce_contact/README.md) | Upserts Shopify customers into Salesforce Contacts every five minutes, incrementally and idempotently. |
+| [`shopify-product-to-salesforce-product`](shopify_integrations/shopify-product-to-salesforce-product/README.md) | Upserts Shopify product variants into Salesforce Product2 every five minutes, incrementally and idempotently. |
 
 ## Layout
 
@@ -23,13 +25,29 @@ otter_examples/                                 this git repository, and the Ott
 └── shopify_integrations/                       a grouping directory, not a project boundary
     ├── lib/python/                             shared code, snapshotted into each release
     │   ├── otter_connectors/                   Shopify + Salesforce clients, watermark, config
-    │   └── otter_schema/                       field references used by mappings
-    └── shopify_customer_to_salesforce_contact/
+    │   ├── otter_schema/                       schema references, and the puller that writes them
+    │   └── tests/
+    ├── shopify_customer_to_salesforce_contact/
+    │   ├── otter.yaml                          when and how it runs
+    │   ├── main.py  source.py  mapping.py      orchestration / read / write
+    │   ├── tests/test_logic.py
+    │   └── README.md                           the full setup and operations guide
+    └── shopify-product-to-salesforce-product/
         ├── otter.yaml                          when and how it runs
         ├── main.py  source.py  mapping.py      orchestration / read / write
-        ├── tests/test_logic.py
+        ├── settings.py  product_sync.py        every knob / the page loop
+        ├── sync_window.py  run_state.py        the resumable window / run bookkeeping
+        ├── queries/                            products.graphql, product-variants.graphql
+        ├── schema/                             pulled Shopify + Salesforce schema references
+        ├── tests/                              test_main.py, test_settings.py, test_source.py
         └── README.md                           the full setup and operations guide
 ```
+
+The two integrations are structurally similar but not identical: the product
+sync splits the page loop, the window and the run bookkeeping into their own
+modules, and keeps its GraphQL documents in `queries/` next to a pulled `schema/`
+that the mapping names fields through. Both are self-contained directories, and
+either can be read on its own.
 
 Two things about this layout are worth knowing up front.
 
@@ -40,10 +58,12 @@ related integrations; it is not a separate project and holds no `.otter/` of its
 own. Run `otter` commands from the repository root — they also work from
 anywhere beneath it, because the search walks upward.
 
-**An integration is addressed by its manifest `name:`.** Here that is
-`shopify_customer_to_salesforce_contact`, which matches the directory it lives
-in, and it is the string every CLI command takes:
-`otter validate shopify_customer_to_salesforce_contact`. A path works too —
+**An integration is addressed by its manifest `name:`.** For the customer sync
+that is `shopify_customer_to_salesforce_contact`, and for the product sync it is
+`shopify-product-to-salesforce-product`. Each matches the directory it lives in —
+one spelling with underscores, one with dashes — and each is the string every CLI
+command takes: `otter validate shopify_customer_to_salesforce_contact`,
+`otter release shopify-product-to-salesforce-product`. A path works too —
 `otter validate shopify_integrations/shopify_customer_to_salesforce_contact` —
 and prints the name it resolved.
 
@@ -52,12 +72,13 @@ and prints the name it resolved.
 | | |
 | --- | --- |
 | `otter` | 0.1.9 or newer — `otter --version` |
-| Python | none required on the host. The manifest uses `python.mode: managed`, so Otter prepares the pinned interpreter from `.python-version` and the locked `uv.lock` into `.otter/data/` at release time. |
-| Shopify | a Dev Dashboard app with `read_customers`, installed on a store in the same organization, with protected customer data access approved |
-| Salesforce | a connected app with the client credentials flow and a Run As user, plus a Contact field marked External ID + Unique |
+| Python | none required on the host. Both manifests use `python.mode: managed`, so Otter prepares the pinned interpreter from `.python-version` and the locked `uv.lock` into `.otter/data/` at release time. |
+| Shopify | a Dev Dashboard app installed on a store in the same organization. The customer sync needs `read_customers` **and** protected customer data access approved; the product sync needs `read_products`, which is not protected data. |
+| Salesforce | a connected app with the client credentials flow and a Run As user, plus the external ID fields the mappings upsert on: `Shopify_Customer_Id__c` on Contact, and `Shopify_Variant_Id__c` (plus `Shopify_Product_Id__c`) on Product2. |
 
-Setting those up is the bulk of the work, and the integration README walks
-through each one.
+Setting those up is the bulk of the work, and each integration's README walks
+through its own half. The two integrations are independent: you can run either
+one alone, and neither needs the other's Salesforce fields, scopes or settings.
 
 ## Quick start
 
@@ -70,15 +91,22 @@ cp otter.env.example otter.env
 chmod 600 otter.env
 $EDITOR otter.env        # SHOPIFY_CLIENT_ID/_SECRET, SALESFORCE_CLIENT_ID/_SECRET
 
-# 2. Point the manifest at your own stores (otter.yaml, env: block):
+# 2. Point each manifest at your own stores (otter.yaml, env: block):
 #    SHOPIFY_STORE, SALESFORCE_INSTANCE_URL, BACKFILL_FROM
 
 # 3. Validate, release, run. Commands take the manifest name, or a path.
 otter validate shopify_customer_to_salesforce_contact
-otter release shopify_customer_to_salesforce_contact
+otter validate shopify-product-to-salesforce-product
+otter release --all
 otter start --detach
 otter run shopify_customer_to_salesforce_contact
+otter run shopify-product-to-salesforce-product
 ```
+
+`otter release --all` snapshots and activates every integration in the project;
+naming one is equally fine if you only want one of them running. The same is
+true of the cron triggers — a daemon running with both manifests fires both
+schedules.
 
 There is no `otter init` step: the manifests and the template are already
 committed, and `.otter/` is machine-local state that `otter start` creates. A
@@ -185,12 +213,16 @@ project root. To add one that reuses the vendor clients:
    ```
 
    `.python-version`, `pyproject.toml` and `uv.lock` sit beside it for managed
-   mode; copy them from the existing integration. The `../lib/python` path is
+   mode; copy them from either existing integration. The `../lib/python` path is
    relative to the integration directory, which is why the shared library stays
    a sibling of the integrations and does not move with the project root.
 2. Import from `otter_connectors` rather than copying client code — see
    [`lib/python/README.md`](shopify_integrations/lib/python/README.md) for what
-   is in there and why it is not part of the Otter SDK.
+   is in there and why it is not part of the Otter SDK. If you want the mapping
+   to name fields through pulled schema references instead of bare strings, the
+   product sync is the example to copy from, and
+   [`otter_schema/README.md`](shopify_integrations/lib/python/otter_schema/README.md)
+   documents the puller.
 3. Add only the **names** of any new credentials to `secrets:`, and their values
    to `otter.env` at the repository root. One file serves every integration in
    the project.
@@ -199,11 +231,16 @@ project root. To add one that reuses the vendor clients:
 
 ## Where to read more
 
-- [Integration README](shopify_integrations/shopify_customer_to_salesforce_contact/README.md) —
+- [shopify_customer_to_salesforce_contact README](shopify_integrations/shopify_customer_to_salesforce_contact/README.md) —
   Shopify and Salesforce setup, the full configuration reference, field mapping,
-  failure behaviour and gotchas.
+  failure behaviour and gotchas for the customer sync.
+- [shopify-product-to-salesforce-product README](shopify_integrations/shopify-product-to-salesforce-product/README.md) —
+  the same for the product sync, plus why its root is `products` rather than
+  `productVariants`, and how its GraphQL documents and pulled schema fit together.
 - [`lib/python/README.md`](shopify_integrations/lib/python/README.md) — the shared
   Shopify and Salesforce clients, and how to reuse them.
+- [`otter_schema/README.md`](shopify_integrations/lib/python/otter_schema/README.md) —
+  schema references for mappings, and the puller that writes them.
 - [`.gitignore`](.gitignore) — the secret-exclusion rules, with the reasoning
   inline.
 - `otter --help`, and `otter <command> --help` for the exact flags of any

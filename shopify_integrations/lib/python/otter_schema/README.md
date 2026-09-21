@@ -51,7 +51,8 @@ The metadata is what a mapping would otherwise restate by hand:
 From the repository root:
 
 ```sh
-make sync-schema INTEGRATION=shopify-product-to-salesforce-product
+python3 shopify_integrations/lib/python/otter_schema/pull.py \
+    --integration shopify_integrations/shopify-product-to-salesforce-product
 ```
 
 That is the whole command. Everything else is discovered: the object name,
@@ -61,28 +62,24 @@ explicit environment variable, then the env file, then the manifest -- so a
 one-off retarget needs no edit:
 
 ```sh
-SALESFORCE_OBJECT=Contact make sync-schema INTEGRATION=shopify-to-salesforce
-make sync-schema INTEGRATION=x SYSTEM=salesforce OBJECT="Contact Shopify_Order__c"
+SALESFORCE_OBJECT=Contact python3 shopify_integrations/lib/python/otter_schema/pull.py \
+    --integration shopify_integrations/shopify-product-to-salesforce-product
+python3 shopify_integrations/lib/python/otter_schema/pull.py \
+    --integration shopify_integrations/<name> --system salesforce --object "Contact Shopify_Order__c"
 ```
 
-`SYSTEM` selects which system to pull from and writes to `schema/<SYSTEM>/`.
-`salesforce` and `shopify` are implemented. `OBJECT` takes several, space- or
-comma-separated.
+`--system` selects which system to pull from and writes to `schema/<system>/`;
+`salesforce` and `shopify` are implemented. `--object` takes several, repeatable
+or comma-separated. The script puts the shared library on `sys.path` itself, so
+there is no `PYTHONPATH` to set and nothing to source.
 
-Equivalent without make -- no `PYTHONPATH`, no sourcing:
-
-```sh
-python3 lib/python/otter_schema/pull.py \
-    --integration integrations/shopify-product-to-salesforce-product
-```
-
-Output lands in `<integration>/schema/salesforce/` and is meant to be
+Output lands in `<integration>/schema/<system>/` and is meant to be
 **committed**: it is part of the artifact, and a developer should be able to read
 and autocomplete it without network access.
 
 | Flag | Meaning |
 | --- | --- |
-| `--integration DIR` | the integration directory, or a bare name that resolves under `<checkout>/integrations/` (default: the current one) |
+| `--integration DIR` | the integration directory (default: the current one). A bare name is also accepted, but it resolves under a single `<checkout>/integrations/` directory — this repository keeps integrations under `shopify_integrations/`, so pass the path. |
 | `--system NAME` | which system to pull from (default: `salesforce`); output goes to `schema/<NAME>/` |
 | `--object NAME` | sObject API name; repeatable. Default: `SALESFORCE_OBJECT` |
 | `--env-file PATH` | shared credentials (default: `<checkout>/otter.env`) |
@@ -111,9 +108,14 @@ moment someone edits the org and wrong from the start when a name is a typo.
 
 ## Shopify
 
-`make sync-schema SYSTEM=shopify OBJECT=ProductVariant` walks Shopify's type
-graph from a root and writes one module per root. Two differences from the flat
-Salesforce case, both forced by the schema:
+```sh
+python3 shopify_integrations/lib/python/otter_schema/pull.py \
+    --integration shopify_integrations/shopify-product-to-salesforce-product \
+    --system shopify --object ProductVariant
+```
+
+That walks Shopify's type graph from a root and writes one module per root. Two
+differences from the flat Salesforce case, both forced by the schema:
 
 - **Only the `kind` decides what is a field.** `inventoryPolicy` resolves to
   `ProductVariantInventoryPolicy`, an enum; `legacyResourceId` to
@@ -149,28 +151,29 @@ SDL (3552 types for this store, ~3.5 MB). That is what makes the query a
 **first-class file** rather than a string in `source.py`:
 
 ```
-integrations/<name>/queries/*.graphql     the documents, committed
-integrations/<name>/schema/shopify/shopify.graphql
-graphql.config.yml                        points an editor at both
+shopify_integrations/<name>/queries/*.graphql                 the documents, committed
+shopify_integrations/<name>/schema/shopify/shopify.graphql    the pulled SDL
 ```
 
 With the [GraphQL extension](https://marketplace.visualstudio.com/items?itemName=GraphQL.vscode-graphql)
-installed, completion, hover and errors come from the pulled schema, and
-go-to-definition on a field lands in the SDL. Nothing about that is specific to
-Otter: any tool that reads SDL works, because the file is the schema.
+installed and pointed at the SDL above, completion, hover and errors come from
+the pulled schema, and go-to-definition on a field lands in the SDL. Nothing
+about that is specific to Otter: any tool that reads SDL works, because the file
+is the schema. This checkout commits no `graphql.config.yml`, so wire the
+extension to the SDL (or a `.graphqlrc`) yourself.
 
 The same artifact is what CI validates, so a renamed Shopify field fails a test
 rather than producing an empty value in a run that still reports `succeeded`:
 
 ```sh
-pip install -e 'lib/python[dev]'   # graphql-core
-python3 -m unittest discover -s integrations/<name>/tests
+pip install 'graphql-core>=3.2'   # or: pip install -e 'shopify_integrations/lib/python[dev]'
+PYTHONPATH=shopify_integrations/lib/python:.otter/data/sdk/python \
+    python3 -m unittest discover -s shopify_integrations/<name>/tests
 ```
 
-`make sync-schema SYSTEM=shopify` passes `--no-sdl` to skip the SDL when you only
-want the Python module. `--depth` bounds the module, not the SDL — the SDL is
-always the complete schema, because a truncated schema would make an editor
-report false errors.
+With `--no-sdl`, a Shopify pull writes only the Python module and skips the SDL.
+`--depth` bounds the module, not the SDL — the SDL is always the complete schema,
+because a truncated schema would make an editor report false errors.
 
 ## What is not here yet
 
@@ -182,6 +185,6 @@ Drift between what a document *selects* and what the mapping *reads* is only
 partly covered. `graphql-core` proves every selected field exists; it cannot
 prove the mapping reads a field the document happens to omit, because that
 resolves to `""` silently. An integration asserts that itself, over the parsed
-document — see `integrations/shopify-product-to-salesforce-product/tests/test_source.py`.
+document — see `shopify_integrations/shopify-product-to-salesforce-product/tests/test_source.py`.
 A callable in a mapping is opaque to that check, which is why the one computed
 field there names its own reads by hand.
