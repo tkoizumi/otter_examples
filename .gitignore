@@ -1,0 +1,30 @@
+# Runtime state: SQLite, extracted SDK, the serve record and its log
+.otter/
+
+# Secrets: never commit an env file, templates included.
+#
+# There is deliberately no `!*.env.example` re-include here. Git cannot tell a
+# filled-in template from a placeholder, and a `.env.example` that someone
+# pasted real values into is a secret like any other.
+#
+#   otter.env    the daemon's credentials, at the repository root
+#   .env, *.env  read by nothing; ignored so a stray one cannot be committed
+#   .env.*       .env.example, .env.local, .env.production
+#   *.env.*      otter.env.example, otter.env.production
+#
+# otter.env.example is tracked because it was added before these rules existed;
+# a new template has to be added with `git add -f`, which is the point.
+#
+# These are path rules: they cannot tell a filled-in template from a
+# placeholder. Keep real values out of any file you intend to commit, and use
+# a content-level backstop (gitleaks, trufflehog) for the rest.
+.env
+.env.*
+*.env
+*.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/

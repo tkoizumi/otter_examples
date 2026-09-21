@@ -1,9 +1,9 @@
-# shopify-to-salesforce
+# shopify_contact_to_salesforce_customer
 
 Upserts Shopify customers into Salesforce every five minutes, incrementally and
 idempotently.
 
-```
+```text
 Shopify Admin API (GraphQL)          Otter                      Salesforce REST API
   customers(updated_at:>watermark)  ──►  child Python process  ──►  composite/sobjects upsert
   cursor pagination                     state: watermark,           by Shopify_Customer_Id__c
@@ -14,62 +14,80 @@ Runtime primitives (scheduling, the watermark, retries, timeouts, logs, run
 history) are all Otter's. The vendor clients are not — they live in a shared
 library, so this file holds only what is specific to this sync.
 
-## Code layout
+> **The directory name is not the integration name.** This directory is
+> `shopify_customer_to_salesforce_contact`; the manifest's `name:` is
+> `shopify_contact_to_salesforce_customer`, and that is the string every CLI
+> command takes. `otter validate` prints the manifest name, so when in doubt
+> pass the directory instead: `otter validate .`
+
+## Where this sits in the workspace
+
+One integration directory inside the `shopify_integrations` grouping directory.
+The Otter project root is the repository root, which is where `otter.env` and
+`.otter/` live. Paths below are relative to this directory unless stated
+otherwise.
 
 ```text
-lib/python/otter_connectors/          shared, reusable, no third-party deps
-├── shopify.py        Shopify GraphQL client: client credentials grant,
-│                     throttle backoff, Relay cursor paging
-├── salesforce.py     Salesforce REST client: OAuth, batched upsert by
-│                     External ID, picklist-aware values, address fallback
-├── records.py        record building: dotted paths, join, drop empties,
-│                     truncate, mapping validation
-├── checkpoint.py     Watermark: resumable "what have I processed?" state
-├── config.py         env / env_int / env_bool / require_env
-├── http.py           the CA-aware opener both clients share
-├── timeutil.py       utcnow / to_iso / parse_iso
-└── errors.py         ConnectorError, ConfigError
-
-integrations/shopify-to-salesforce/   this integration only
-├── otter.yaml        when and how it runs
-├── source.py         what we read from Shopify: the query and its paging
-├── mapping.py        where it lands: the Contact mapping and field lengths
-├── main.py           orchestration: clients, watermark, page loop, retries
-└── tests/            mapping and query, testable without a daemon
+otter_examples/                                the Otter project root
+├── otter.env                                  secrets; 0600, gitignored, loaded by `otter start`
+├── otter.env.example                          the committed template to copy
+├── .gitignore                                 keeps every env file out of git
+└── shopify_integrations/                      a grouping directory, not a project boundary
+    ├── lib/python/                            shared code, snapshotted into each release
+    │   ├── otter_connectors/
+    │   │   ├── shopify.py        Shopify GraphQL client: client credentials grant,
+    │   │   │                     throttle backoff, Relay cursor paging
+    │   │   ├── salesforce.py     Salesforce REST client: OAuth, batched upsert by
+    │   │   │                     External ID, picklist-aware values, address fallback
+    │   │   ├── records.py        record building: dotted paths, join, drop empties,
+    │   │   │                     truncate, mapping validation
+    │   │   ├── checkpoint.py     Watermark: resumable "what have I processed?" state
+    │   │   ├── config.py         env / env_int / env_bool / require_env
+    │   │   ├── http.py           the CA-aware opener both clients share
+    │   │   ├── timeutil.py       utcnow / to_iso / parse_iso
+    │   │   └── errors.py         ConnectorError, ConfigError
+    │   └── otter_schema/         field references used by mappings
+    └── shopify_customer_to_salesforce_contact/    <- you are here
+        ├── otter.yaml        when and how it runs
+        ├── source.py         what we read from Shopify: the query and its paging
+        ├── mapping.py        where it lands: the Contact mapping and field lengths
+        ├── main.py           orchestration: clients, watermark, page loop, dead letters
+        └── tests/test_logic.py
 ```
 
 **Editing the integration usually means editing `source.py` and `mapping.py`
 only.** Adding a field is a line in each (the query, and the mapping) plus a
 length in `MAX_FIELD_LENGTH`; `main.py` should not need touching, and
-`tests/test_source.py` fails if the query and the mapping drift apart.
+`tests/test_logic.py` pins the mapping down.
 
 `mapping.py` is deliberately pure — no environment reads, no I/O, nothing
 imported from `main` or `source` — so it is testable on a plain dict and could
 be lifted into a shared package unchanged.
 
 Nothing special makes the sibling imports work: Otter runs `python3 main.py`
-with the working directory set to the integration directory, so Python puts
-that directory on `sys.path` itself.
+with the working directory set to the integration directory, so Python puts that
+directory on `sys.path` itself.
 
 The manifest points at the shared library, which Otter puts on the child's
 `PYTHONPATH` — no install step, and `otter validate` fails if the path is wrong:
 
 ```yaml
 python:
-  executable: python3
+  mode: managed          # Otter prepares the interpreter named in .python-version
   path:
-    - ../../lib/python
+    - ../lib/python
 ```
 
-See [`lib/python/README.md`](../../lib/python/README.md) for why this is not part
-of the Otter SDK, and how to reuse it from another integration.
+See [`lib/python/README.md`](../lib/python/README.md) for why this is not part of
+the Otter SDK, and how to reuse it from another integration.
 
 - [Before you start](#before-you-start)
-- [Install](#install)
+- [Secrets: where they live](#secrets-where-they-live)
 - [Configuration](#configuration)
-- [First run](#first-run)
-- [Turn on the schedule](#turn-on-the-schedule)
+- [Running it](#running-it)
+- [The schedule](#the-schedule)
 - [Day two operations](#day-two-operations)
+- [Keeping secrets out of git](#keeping-secrets-out-of-git)
 - [How it behaves when things go wrong](#how-it-behaves-when-things-go-wrong)
 - [Field mapping](#field-mapping)
 - [Gotchas](#gotchas)
@@ -198,54 +216,96 @@ changes their password or the org's IP restrictions change.
 
 ---
 
-## Install
+## Secrets: where they live
 
-Any directory containing an `otter.yaml` is an integration. Put this one
-wherever your deployment keeps integrations:
+`otter.yaml` lists four **names** under `secrets:` and holds **no values**:
 
-```bash
-sudo mkdir -p /srv/otter/integrations
-sudo cp -r integrations/shopify-to-salesforce /srv/otter/integrations/
-sudo chown -R otter:otter /srv/otter
+```yaml
+secrets:
+  - SHOPIFY_CLIENT_ID
+  - SHOPIFY_CLIENT_SECRET
+  - SALESFORCE_CLIENT_ID
+  - SALESFORCE_CLIENT_SECRET
 ```
 
-Secrets go in the **daemon's** environment, never in the manifest. Otter reads
-the keys listed under `secrets:` from its own environment and injects them into
-the child process, and it refuses to start Python at all if one is missing.
-`otter inspect` prints `env:` values, so anything in the manifest is public —
-only put non-secret settings there.
+Otter reads those names from the **daemon's environment**, injects them into the
+child process, and refuses to start Python at all if one is missing. The values
+belong in one file, at the project root:
 
-```bash
-sudo install -m 600 -o otter -g otter /dev/null /etc/otter/shopify-to-salesforce.env
-sudo tee /etc/otter/shopify-to-salesforce.env >/dev/null <<'EOF'
-SHOPIFY_CLIENT_ID=...
-SHOPIFY_CLIENT_SECRET=...
-SALESFORCE_CLIENT_ID=3MVG9...
-SALESFORCE_CLIENT_SECRET=...
-EOF
+```text
+otter.env        # repository root, next to .otter/, mode 0600, gitignored
 ```
 
-See [`.env.example`](.env.example).
-
-Validate the manifest before going further — this runs locally and needs no
-daemon:
+Copy the committed template once and fill it in — from the repository root:
 
 ```bash
-./bin/otter validate /srv/otter/integrations/shopify-to-salesforce
-# ok: shopify-to-salesforce (/srv/otter/integrations/shopify-to-salesforce/otter.yaml)
+cp otter.env.example otter.env
+chmod 600 otter.env
+$EDITOR otter.env
 ```
+
+Then — and this is the step that trips everyone up:
+
+> **Secrets are read when the daemon starts, not when a run starts.**
+> Editing `otter.env` under a running daemon changes nothing. Restart it:
+>
+> ```bash
+> otter stop && otter start --detach
+> ```
+
+A run against a daemon that predates the file fails in about a millisecond:
+
+```text
+not started: integration shopify_contact_to_salesforce_customer requires
+secrets that are not available: SALESFORCE_CLIENT_ID, SALESFORCE_CLIENT_SECRET,
+SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET
+```
+
+If you see that, check in this order:
+
+1. The daemon was started **after** `otter.env` was written (`otter status`
+   shows uptime — compare it against the file's mtime).
+2. The keys are spelled exactly as they are in `secrets:`.
+3. The shell that ran `otter start` did not already export any of the four. A
+   variable already set in the environment **wins over the file**, and an empty
+   export is still "set".
+4. You used `otter start`. `otter serve` and bare `otterd` do **not** load
+   `otter.env` — they take only the environment they inherit.
+
+Things that are true once it is set up:
+
+- **`otter inspect` never prints secrets.** It prints the manifest's whole
+  `env:` block, which is why no value may ever be written into `otter.yaml`.
+- **The daemon's full environment reaches the child**, not just declared
+  secrets, so the operational knobs below can be set in `otter.env`. A key the
+  manifest also defines under `env:` is overridden by the manifest, and a
+  manifest value may pull from the daemon environment with `${VAR}`:
+
+  ```yaml
+  env:
+    SHOPIFY_STORE: ${PROD_SHOPIFY_STORE}
+  ```
+
+- **Deploying to a host:** `otter deploy` reads `otter.env` (flag `--env-file`)
+  and installs it on the remote as the shared credentials file, which the
+  systemd unit loads as `EnvironmentFile=-/etc/otter/shared.env`. One file for
+  every integration, because the daemon's environment is a single process
+  environment. `otter.daemon.env` is the separate, daemon-wide file
+  (`--daemon-env`) for the same mechanism.
 
 ---
 
 ## Configuration
 
-### In `otter.yaml` (non-secret, edits go here)
+### In `otter.yaml` (non-secret; edits go here)
 
-| Key | Default in the manifest | Notes |
+These are the values currently in the manifest — replace them with your own.
+
+| Key | Current value | Notes |
 | --- | --- | --- |
-| `SHOPIFY_STORE` | `your-store.myshopify.com` | Your `*.myshopify.com` domain. |
+| `SHOPIFY_STORE` | `robin-dev-3.myshopify.com` | Your `*.myshopify.com` domain. |
 | `SHOPIFY_API_VERSION` | `2026-07` | Pin it; bump deliberately. |
-| `SALESFORCE_INSTANCE_URL` | `https://your-domain.my.salesforce.com` | My Domain; also the token endpoint. |
+| `SALESFORCE_INSTANCE_URL` | `https://drive-energy-1561.my.salesforce.com` | My Domain; also the token endpoint. |
 | `SALESFORCE_API_VERSION` | `62.0` | Any version your org supports. |
 | `SALESFORCE_AUTH` | `client_credentials` | Or `password`. |
 | `SALESFORCE_OBJECT` | `Contact` | `Account` works but needs a different mapping. |
@@ -255,8 +315,9 @@ daemon:
 ### In the daemon's environment (operational knobs, set per deployment)
 
 These are read with sensible defaults and are deliberately **not** in the
-manifest, so exporting them for the daemon overrides them without editing a
-committed file. Remember the manifest wins for any key it also defines.
+manifest, so exporting them for the daemon (or putting them in `otter.env`)
+overrides them without editing a committed file. The manifest wins for any key
+it also defines.
 
 | Key | Default | Purpose |
 | --- | --- | --- |
@@ -271,6 +332,9 @@ committed file. Remember the manifest wins for any key it also defines.
 | `SHOPIFY_API_BASE` | derived from store + version | Override to point at a mock. |
 | `SHOPIFY_TOKEN_URL` | `https://<store>/admin/oauth/access_token` | Override to point at a mock. |
 | `SALESFORCE_USERNAME` / `SALESFORCE_PASSWORD` | unset | Password flow only. |
+
+Because these arrive through the daemon's environment, changing one means a
+restart, exactly like a secret.
 
 ### Secrets (daemon environment, listed under `secrets:`)
 
@@ -303,61 +367,69 @@ own the staleness problem, which is why it is not the default.
 
 ---
 
-## First run
+## Running it
 
-Start the daemon in dry-run mode. It will log exactly what it *would* write and
-change nothing — not the watermark, not Salesforce.
+All commands run from the project root (the repository root) unless noted. The
+integration is addressed by its manifest name.
 
 ```bash
-set -a; . /etc/otter/shopify-to-salesforce.env; set +a
-DRY_RUN=1 ./bin/otterd --integrations /srv/otter/integrations --data /var/lib/otter
+# 1. Check the manifest. Runs locally, needs no daemon, and catches a bad
+#    python.path or a malformed env block before anything else. The argument is
+#    the manifest name; a path (shopify_integrations/<dir>) works too.
+otter validate shopify_contact_to_salesforce_customer
+
+# 2. Snapshot the integration and its shared code into an immutable release and
+#    activate it. Runs execute the ACTIVE RELEASE, so an edit to main.py,
+#    source.py or mapping.py is not live until this runs again.
+otter release shopify_contact_to_salesforce_customer
+
+# 3. Start the daemon. This is the step that loads otter.env.
+otter start --detach
+otter status
 ```
 
-In another shell:
+`otter run` refuses with `has no active release` (HTTP 409) if you skip the
+release step.
+
+**Dry run first.** `DRY_RUN` is read from the daemon's environment, so put it in
+`otter.env` (or export it) and restart:
 
 ```bash
-./bin/otter integrations
-./bin/otter run shopify-to-salesforce
-./bin/otter logs <run-id> | head -40
+DRY_RUN=1 otter start --detach       # no writes, watermark not advanced
+otter run shopify_contact_to_salesforce_customer
+otter logs <run-id> | head -40
 ```
 
-Look for `dry run: would upsert` lines containing real names and emails. Then
-check nothing was written:
+Look for `dry run: would upsert` lines containing real names and emails, then
+confirm nothing was recorded:
 
 ```bash
-./bin/otter state get shopify-to-salesforce sync_cursor
-# otter: shopify-to-salesforce/sync_cursor is not set
+otter state get shopify_contact_to_salesforce_customer sync_cursor
+# otter: shopify_contact_to_salesforce_customer/sync_cursor is not set
 ```
 
-Now do it for real. Restart the daemon without `DRY_RUN`:
+**Then for real.** Restart without `DRY_RUN` and run again. The first run
+backfills from `BACKFILL_FROM`, `MAX_PAGES_PER_RUN` pages at a time. If you have
+more customers than fit in one run it exits **succeeded** with
+`complete: false`, and the next run continues from the saved page cursor — no
+data is lost and nothing is written twice. Watch progress:
 
 ```bash
-set -a; . /etc/otter/shopify-to-salesforce.env; set +a
-./bin/otterd --integrations /srv/otter/integrations --data /var/lib/otter
-./bin/otter run shopify-to-salesforce
-```
-
-The first run backfills from `BACKFILL_FROM`, `MAX_PAGES_PER_RUN` pages at a
-time. If you have more customers than fit in one run it will exit
-**succeeded** with `complete: false`, and the next run continues from the saved
-page cursor — no data is lost and nothing is written twice. Watch progress:
-
-```bash
-./bin/otter state get shopify-to-salesforce last_run
-./bin/otter state get shopify-to-salesforce in_progress_cursor
+otter state get shopify_contact_to_salesforce_customer last_run
+otter state get shopify_contact_to_salesforce_customer in_progress_cursor
 ```
 
 Once a window drains, the watermark advances and later runs only pick up
 customers changed since. Confirm with a second run — it should fetch nothing:
 
 ```bash
-./bin/otter logs "$(./bin/otter run shopify-to-salesforce)" | grep 'sync finished'
+otter logs "$(otter run shopify_contact_to_salesforce_customer)" | grep 'sync finished'
 # sync finished {"complete":true,"failed":0,"fetched":0,"pages":1,"written":0,...}
 ```
 
 ---
 
-## Turn on the schedule
+## The schedule
 
 The manifest already has the trigger:
 
@@ -367,11 +439,11 @@ trigger:
 ```
 
 Otter registers cron triggers from the manifest on every start, so there is
-nothing else to enable — a daemon running with this integration will fire every
-five minutes. To test without the schedule first, simply comment the `trigger:`
-block out while you are doing the first runs above; manual runs work either way.
+nothing else to enable — a daemon running with this integration fires every five
+minutes. To work without the schedule first, comment the `trigger:` block out
+and restart; manual runs work either way.
 
-A systemd unit:
+Deployed, `otter deploy` writes the systemd unit for you. It looks like this:
 
 ```ini
 [Unit]
@@ -380,7 +452,7 @@ After=network-online.target
 
 [Service]
 User=otter
-EnvironmentFile=/etc/otter/shopify-to-salesforce.env
+EnvironmentFile=-/etc/otter/shared.env
 ExecStart=/usr/local/bin/otterd \
   --integrations /srv/otter/integrations \
   --data /var/lib/otter \
@@ -393,18 +465,23 @@ RestartSec=2
 WantedBy=multi-user.target
 ```
 
+The leading `-` on `EnvironmentFile` means the unit still starts if the file is
+absent; it will simply fail every run with the "secrets are not available"
+message above until you install it.
+
 ---
 
 ## Day two operations
 
 ```bash
-otter status                                   # queue depth, run counts
-otter inspect shopify-to-salesforce            # config, cron, next fire time
-otter runs --integration shopify-to-salesforce --limit 20
+otter status                                                       # queue depth, run counts
+otter integrations --schedule                                      # cron, next run, last outcome
+otter inspect shopify_contact_to_salesforce_customer               # config, cron, next fire time
+otter runs --integration shopify_contact_to_salesforce_customer --limit 20
 otter logs <run-id> --follow
-otter state get shopify-to-salesforce last_run
-otter state get shopify-to-salesforce failed_customers
-otter state get shopify-to-salesforce failed_total
+otter state get shopify_contact_to_salesforce_customer last_run
+otter state get shopify_contact_to_salesforce_customer failed_customers
+otter state get shopify_contact_to_salesforce_customer failed_total
 ```
 
 **Re-read the dead letters.** Records Salesforce permanently rejected are kept
@@ -413,10 +490,10 @@ counts all of them. Fix the cause — usually a State/Country picklist — then
 re-sync those customers by rewinding the watermark:
 
 ```bash
-otter state set shopify-to-salesforce sync_cursor '"2026-01-01T00:00:00Z"'
-otter state delete shopify-to-salesforce in_progress_cursor
-otter state delete shopify-to-salesforce in_progress_window_start
-otter run shopify-to-salesforce
+otter state set shopify_contact_to_salesforce_customer sync_cursor '"2026-01-01T00:00:00Z"'
+otter state delete shopify_contact_to_salesforce_customer in_progress_cursor
+otter state delete shopify_contact_to_salesforce_customer in_progress_window_start
+otter run shopify_contact_to_salesforce_customer
 ```
 
 Rewinding is safe: every write is an upsert, so re-syncing updates the same
@@ -424,8 +501,48 @@ Contacts rather than duplicating them.
 
 **Force a full re-sync.** Same as above with `BACKFILL_FROM`'s value.
 
-**Pause the integration.** Comment out the `trigger:` block and restart the
-daemon; manual runs still work. Queued and running jobs are unaffected.
+**Pause the integration.** Comment out the `trigger:` block, `otter release` it
+again, and restart the daemon; manual runs still work. Queued and running jobs
+are unaffected.
+
+**Ship a code change.** Edit `source.py` / `mapping.py`, run `otter validate`,
+then `otter release` again. Until you do, runs keep executing the previous
+release.
+
+---
+
+## Keeping secrets out of git
+
+The rule that matters: **`.gitignore` only filters untracked files.** Adding a
+pattern does nothing for a file that is already in the index — it has to be
+removed from the index explicitly:
+
+```bash
+git rm --cached path/to/file        # keeps the working-tree copy
+```
+
+Two traps specific to this workspace:
+
+- **A filled-in template is a secret.** `*.env.example` is ignored here, so a
+  `.env.example` cannot be committed even if someone pastes real values into it.
+  The committed template is `otter.env.example` at the repository root, and it
+  must stay free of real values.
+- **`.env` files are ignored, but nothing else is.** A credential pasted into
+  `main.py`, a test fixture or a log is still committable. `.gitignore` is a path
+  filter, not a secret scanner; add a content-level backstop
+  ([gitleaks](https://github.com/gitleaks/gitleaks),
+  [trufflehog](https://github.com/trufflesecurity/trufflehog)) if this repo is
+  pushed anywhere.
+
+GitHub's push protection blocks a push whose commits contain a live credential,
+which is the desired outcome but is not a substitute for rotation: **if a real
+secret is ever committed, rotate it.** Rewriting the commit stops publication;
+only rotation makes the leaked value worthless.
+
+Note that `otter init` on 0.1.10 scaffolds a `.gitignore` that already matches
+the rules at the repository root, including the absence of a template
+re-include. `otter.env.example` stays committed only because it predates those
+rules; a new template has to be added with `git add -f`.
 
 ---
 
@@ -442,7 +559,10 @@ daemon; manual runs still work. Queued and running jobs are unaffected.
 | Row locked / request limit (`UNABLE_TO_LOCK_ROW`, 429) | Retried, then the single record is retried on its own | Transient; the batch should not be lost |
 | Run hits the time budget | Exits **succeeded** with the page cursor saved | Better than being killed by the timeout and marked `timed_out` |
 | Process killed / daemon restarted mid-window | Next run resumes from the saved page cursor | The watermark only moves when a window is fully drained |
-| Missing secret in the daemon env | Run fails before Python starts, and is **not** retried | Caught by Otter, not by this code |
+| Missing secret in the daemon environment | Run fails before Python starts, and is **not** retried | Caught by Otter, not by this code |
+| Daemon started before `otter.env` was written | Every run fails instantly with `requires secrets that are not available` | The daemon's environment is read once, at startup |
+| No active release, or an edited file not re-released | `otter run` refuses with `has no active release` (409); an activated release keeps running the old code | Runs execute an immutable release, not the working tree |
+| `python.path` missing from the release snapshot | The release is marked invalid and runs fail before Python starts | Shared code is captured at release time; re-run `otter release` |
 
 ---
 
@@ -482,8 +602,8 @@ mapping = {
 ```
 
 Anything that does not fit is just a Python callable, so there is no mapping
-language to learn or outgrow. `integrations/shopify-to-salesforce/tests/`
-pins the mapping down — it is the part that changes most often.
+language to learn or outgrow. `tests/test_logic.py` pins the mapping down — it
+is the part that changes most often.
 
 Anything beyond the standard fields above plus the external ID needs a matching
 custom field in Salesforce first, or every write fails with `INVALID_FIELD`.
@@ -495,11 +615,11 @@ custom field in Salesforce first, or every write fails with `INVALID_FIELD`.
 **`CERTIFICATE_VERIFY_FAILED` on a developer Mac.** The python.org macOS
 installers ship no CA store: `ssl.get_default_verify_paths().openssl_cafile`
 points at a `cert.pem` that was never created, so *every* HTTPS request from
-that interpreter fails — Shopify and Salesforce alike. `main.py` detects this
-and falls back to `certifi`'s bundle, which is already installed alongside that
-Python, so no configuration is needed. The underlying interpreter can also be
-fixed properly with `sudo "/Applications/Python <ver>/Install Certificates.command"`
-(worth doing if you use that Python for anything else).
+that interpreter fails — Shopify and Salesforce alike. `otter_connectors/http.py`
+detects this and falls back to `certifi`'s bundle, so no configuration is needed.
+The underlying interpreter can also be fixed properly with
+`sudo "/Applications/Python <ver>/Install Certificates.command"` (worth doing if
+you use that Python for anything else).
 
 **State and Country picklists.** If your org has them enabled, `MailingState`
 and `MailingCountry` are restricted picklists. `provinceCode`/`countryCodeV2`
@@ -538,7 +658,7 @@ watch the first run after the change.
 ## Later improvements
 
 - **Shopify webhooks.** Register `customers/create` and `customers/update`
-  webhooks pointing at Otter's `POST /v1/hooks/shopify-to-salesforce` for
+  webhooks pointing at Otter's `POST /v1/hooks/<integration>` for
   near-real-time sync. You still want this polling integration as the
   reconciliation safety net, since webhooks can be dropped. It needs the daemon
   reachable from Shopify over TLS, with the generated webhook token.
