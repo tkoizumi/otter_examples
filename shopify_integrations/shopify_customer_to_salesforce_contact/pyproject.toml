@@ -13,7 +13,7 @@
 # `uv lock`.
 
 [project]
-name = "shopify_contact_to_salesforce_customer"
+name = "shopify_customer_to_salesforce_contact"
 version = "0.1.0"
 description = "Upsert Shopify customers into Salesforce."
 # The prepared interpreter is pinned exactly in .python-version; this is the

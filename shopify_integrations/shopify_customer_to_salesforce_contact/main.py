@@ -246,7 +246,7 @@ def _record_failures(ctx, failures):
     They are deliberately not raised: a single malformed customer must not stop
     the other 2000 from syncing, and the watermark should still advance.
 
-    Inspect with: otter state get shopify-to-salesforce failed_customers
+    Inspect with: otter state get shopify_customer_to_salesforce_contact failed_customers
     """
     existing = ctx.state.get("failed_customers") or []
     if not isinstance(existing, list):

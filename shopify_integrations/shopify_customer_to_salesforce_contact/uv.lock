@@ -2,6 +2,6 @@ version = 1
 requires-python = ">=3.10"
 
 [[package]]
-name = "shopify-contact-to-salesforce-customer"
+name = "shopify-customer-to-salesforce-contact"
 version = "0.1.0"
 source = { virtual = "." }

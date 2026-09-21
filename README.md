@@ -40,14 +40,12 @@ related integrations; it is not a separate project and holds no `.otter/` of its
 own. Run `otter` commands from the repository root — they also work from
 anywhere beneath it, because the search walks upward.
 
-**A directory name is not an integration name.** The CLI addresses an
-integration by the `name:` field in its manifest. That directory is
-`shopify_customer_to_salesforce_contact`; the integration is
-`shopify_contact_to_salesforce_customer`. Commands take the name or a path; a
-bare directory name is neither, and resolves only when it happens to be a valid
-path from your working directory. When in doubt pass the path —
+**An integration is addressed by its manifest `name:`.** Here that is
+`shopify_customer_to_salesforce_contact`, which matches the directory it lives
+in, and it is the string every CLI command takes:
+`otter validate shopify_customer_to_salesforce_contact`. A path works too —
 `otter validate shopify_integrations/shopify_customer_to_salesforce_contact` —
-which prints the name it resolved.
+and prints the name it resolved.
 
 ## Prerequisites
 
@@ -76,10 +74,10 @@ $EDITOR otter.env        # SHOPIFY_CLIENT_ID/_SECRET, SALESFORCE_CLIENT_ID/_SECR
 #    SHOPIFY_STORE, SALESFORCE_INSTANCE_URL, BACKFILL_FROM
 
 # 3. Validate, release, run. Commands take the manifest name, or a path.
-otter validate shopify_contact_to_salesforce_customer
-otter release shopify_contact_to_salesforce_customer
+otter validate shopify_customer_to_salesforce_contact
+otter release shopify_customer_to_salesforce_contact
 otter start --detach
-otter run shopify_contact_to_salesforce_customer
+otter run shopify_customer_to_salesforce_contact
 ```
 
 There is no `otter init` step: the manifests and the template are already

@@ -1,4 +1,4 @@
-# shopify_contact_to_salesforce_customer
+# shopify_customer_to_salesforce_contact
 
 Upserts Shopify customers into Salesforce every five minutes, incrementally and
 idempotently.
@@ -14,11 +14,10 @@ Runtime primitives (scheduling, the watermark, retries, timeouts, logs, run
 history) are all Otter's. The vendor clients are not — they live in a shared
 library, so this file holds only what is specific to this sync.
 
-> **The directory name is not the integration name.** This directory is
-> `shopify_customer_to_salesforce_contact`; the manifest's `name:` is
-> `shopify_contact_to_salesforce_customer`, and that is the string every CLI
-> command takes. `otter validate` prints the manifest name, so when in doubt
-> pass the directory instead: `otter validate .`
+> **The integration is addressed by the manifest's `name:`.** It is
+> `shopify_customer_to_salesforce_contact`, which matches this directory, and
+> that is the string every CLI command takes. From inside this directory,
+> `otter validate .` does the same without naming it.
 
 ## Where this sits in the workspace
 
@@ -256,7 +255,7 @@ Then — and this is the step that trips everyone up:
 A run against a daemon that predates the file fails in about a millisecond:
 
 ```text
-not started: integration shopify_contact_to_salesforce_customer requires
+not started: integration shopify_customer_to_salesforce_contact requires
 secrets that are not available: SALESFORCE_CLIENT_ID, SALESFORCE_CLIENT_SECRET,
 SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET
 ```
@@ -376,12 +375,12 @@ integration is addressed by its manifest name.
 # 1. Check the manifest. Runs locally, needs no daemon, and catches a bad
 #    python.path or a malformed env block before anything else. The argument is
 #    the manifest name; a path (shopify_integrations/<dir>) works too.
-otter validate shopify_contact_to_salesforce_customer
+otter validate shopify_customer_to_salesforce_contact
 
 # 2. Snapshot the integration and its shared code into an immutable release and
 #    activate it. Runs execute the ACTIVE RELEASE, so an edit to main.py,
 #    source.py or mapping.py is not live until this runs again.
-otter release shopify_contact_to_salesforce_customer
+otter release shopify_customer_to_salesforce_contact
 
 # 3. Start the daemon. This is the step that loads otter.env.
 otter start --detach
@@ -396,7 +395,7 @@ release step.
 
 ```bash
 DRY_RUN=1 otter start --detach       # no writes, watermark not advanced
-otter run shopify_contact_to_salesforce_customer
+otter run shopify_customer_to_salesforce_contact
 otter logs <run-id> | head -40
 ```
 
@@ -404,8 +403,8 @@ Look for `dry run: would upsert` lines containing real names and emails, then
 confirm nothing was recorded:
 
 ```bash
-otter state get shopify_contact_to_salesforce_customer sync_cursor
-# otter: shopify_contact_to_salesforce_customer/sync_cursor is not set
+otter state get shopify_customer_to_salesforce_contact sync_cursor
+# otter: shopify_customer_to_salesforce_contact/sync_cursor is not set
 ```
 
 **Then for real.** Restart without `DRY_RUN` and run again. The first run
@@ -415,15 +414,15 @@ more customers than fit in one run it exits **succeeded** with
 data is lost and nothing is written twice. Watch progress:
 
 ```bash
-otter state get shopify_contact_to_salesforce_customer last_run
-otter state get shopify_contact_to_salesforce_customer in_progress_cursor
+otter state get shopify_customer_to_salesforce_contact last_run
+otter state get shopify_customer_to_salesforce_contact in_progress_cursor
 ```
 
 Once a window drains, the watermark advances and later runs only pick up
 customers changed since. Confirm with a second run — it should fetch nothing:
 
 ```bash
-otter logs "$(otter run shopify_contact_to_salesforce_customer)" | grep 'sync finished'
+otter logs "$(otter run shopify_customer_to_salesforce_contact)" | grep 'sync finished'
 # sync finished {"complete":true,"failed":0,"fetched":0,"pages":1,"written":0,...}
 ```
 
@@ -476,12 +475,12 @@ message above until you install it.
 ```bash
 otter status                                                       # queue depth, run counts
 otter integrations --schedule                                      # cron, next run, last outcome
-otter inspect shopify_contact_to_salesforce_customer               # config, cron, next fire time
-otter runs --integration shopify_contact_to_salesforce_customer --limit 20
+otter inspect shopify_customer_to_salesforce_contact               # config, cron, next fire time
+otter runs --integration shopify_customer_to_salesforce_contact --limit 20
 otter logs <run-id> --follow
-otter state get shopify_contact_to_salesforce_customer last_run
-otter state get shopify_contact_to_salesforce_customer failed_customers
-otter state get shopify_contact_to_salesforce_customer failed_total
+otter state get shopify_customer_to_salesforce_contact last_run
+otter state get shopify_customer_to_salesforce_contact failed_customers
+otter state get shopify_customer_to_salesforce_contact failed_total
 ```
 
 **Re-read the dead letters.** Records Salesforce permanently rejected are kept
@@ -490,10 +489,10 @@ counts all of them. Fix the cause — usually a State/Country picklist — then
 re-sync those customers by rewinding the watermark:
 
 ```bash
-otter state set shopify_contact_to_salesforce_customer sync_cursor '"2026-01-01T00:00:00Z"'
-otter state delete shopify_contact_to_salesforce_customer in_progress_cursor
-otter state delete shopify_contact_to_salesforce_customer in_progress_window_start
-otter run shopify_contact_to_salesforce_customer
+otter state set shopify_customer_to_salesforce_contact sync_cursor '"2026-01-01T00:00:00Z"'
+otter state delete shopify_customer_to_salesforce_contact in_progress_cursor
+otter state delete shopify_customer_to_salesforce_contact in_progress_window_start
+otter run shopify_customer_to_salesforce_contact
 ```
 
 Rewinding is safe: every write is an upsert, so re-syncing updates the same

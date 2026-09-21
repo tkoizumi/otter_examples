@@ -30,8 +30,8 @@ from .timeutil import parse_iso, to_iso
 
 __all__ = ["DEFAULT_KEYS", "Watermark"]
 
-#: State keys, matching the names the shopify-to-salesforce example has always
-#: used so existing deployments keep their position.
+#: State keys, matching the names this example has always used so existing
+#: deployments keep their position.
 DEFAULT_KEYS = {
     "committed": "sync_cursor",
     "window": "in_progress_window_start",

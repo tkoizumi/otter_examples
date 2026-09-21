@@ -1,6 +1,7 @@
 version: 1
 
-name: shopify_contact_to_salesforce_customer
+name: shopify_customer_to_salesforce_contact
+
 description: Upsert Shopify customers into Salesforce every five minutes.
 
 entrypoint: main.py
