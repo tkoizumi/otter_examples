@@ -1,5 +1,13 @@
-# Runtime state: SQLite, extracted SDK, the serve record and its log
+# Runtime state: SQLite, extracted SDK, prepared Python environments, the serve
+# record and its log. Everything under here is machine-local and rebuildable.
 .otter/
+
+# Integration identity markers. The runtime writes one per integration
+# directory; it names *this checkout's* instance, not the example, so a clone
+# mints its own. A committed marker is replaced with a different id on the first
+# run, which shows up as an unexplained modification in a repo nobody edited.
+.otter-id
+.otter-id.tmp-*
 
 # Secrets: never commit an env file, templates included.
 #
@@ -12,8 +20,10 @@
 #   .env.*       .env.example, .env.local, .env.production
 #   *.env.*      otter.env.example, otter.env.production
 #
-# otter.env.example is tracked because it was added before these rules existed;
-# a new template has to be added with `git add -f`, which is the point.
+# otter.env.example is tracked deliberately, and stays tracked: ignore rules do
+# not apply to a file git already tracks. These rules only stop a *new* template
+# from being added by accident, which is why one has to be added with
+# `git add -f`. That is the point.
 #
 # These are path rules: they cannot tell a filled-in template from a
 # placeholder. Keep real values out of any file you intend to commit, and use
