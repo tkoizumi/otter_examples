@@ -1,0 +1,21 @@
+# Pinned so the drill target lands on the SAME workspace as the runtime host.
+#
+# P0-03's clean-host mode passes one set of absolute paths and one unit name for
+# both hosts, because release metadata records absolute paths and job identity
+# lives in the job's source directory. Without a committed workspace id each
+# `otter deploy` to a new host mints a new id and therefore a new workspace
+# name, and the two hosts cannot be described by one set of parameters.
+workspace: e0309b8c-a9b1-4e8b-a047-e747fcf0c80b
+slug: otter-examples
+
+# Retention windows for the daemon's growing stores, committed so a rebuilt host
+# comes up with them. They are rendered into the deployed unit's ExecStart, so a
+# value here beats one left in the gitignored otter.daemon.env -- the local env
+# file does not survive a rebuild and nothing else records the intent (OT-026).
+#
+# 90 days of run history, 30 days of captured output, 7 days of HTTP payloads.
+# The capture window matches the daemon's own default; it is written out so all
+# three stores are declared in one place rather than one of them being implicit.
+run_retention: 2160h
+log_retention: 720h
+capture_retention: 168h
