@@ -1,0 +1,28 @@
+# The remainder of one product's variants, fetched only when the nested
+# `variants(first: 100)` in products.graphql reports hasNextPage.
+#
+# `$filter` is Shopify's search syntax, not an argument -- it arrives as
+# "product_id:123". Shopify does not validate a filter field name, so a typo
+# matches everything instead of erroring; tests/test_source.py asserts the
+# shape rather than trusting the API to complain.
+query MoreVariants($first: Int!, $after: String, $filter: String!) {
+  productVariants(first: $first, after: $after, query: $filter) {
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+    nodes {
+      id
+      title
+      sku
+      barcode
+      price
+      compareAtPrice
+      inventoryQuantity
+      inventoryPolicy
+      taxable
+      createdAt
+      updatedAt
+    }
+  }
+}

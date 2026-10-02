@@ -1,0 +1,53 @@
+# One page of products changed since the watermark.
+#
+# Products rather than variants is the root. A product-level change does not
+# bump its variants' updatedAt -- in the store this was developed against, most
+# products were newer than every one of their variants -- so a variant-level
+# watermark would never re-sync a renamed product, and the product row carries
+# handle, vendor and status.
+#
+# `variants` is a nested connection and Shopify caps it, so pageInfo is selected
+# and the caller fetches the remainder with product-variants.graphql whenever
+# hasNextPage is true. That is the truncation fix: the cap is detected rather
+# than assumed away, and silently syncing the first page of a large product is
+# the failure it prevents.
+query Products($first: Int!, $after: String, $query: String!, $sortKey: ProductSortKeys!) {
+  products(first: $first, after: $after, query: $query, sortKey: $sortKey) {
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+    nodes {
+      id
+      handle
+      title
+      descriptionHtml
+      vendor
+      productType
+      status
+      tags
+      createdAt
+      updatedAt
+      publishedAt
+      variants(first: 100) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        nodes {
+          id
+          title
+          sku
+          barcode
+          price
+          compareAtPrice
+          inventoryQuantity
+          inventoryPolicy
+          taxable
+          createdAt
+          updatedAt
+        }
+      }
+    }
+  }
+}
