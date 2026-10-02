@@ -1,0 +1,18 @@
+query CastorCustomers($first: Int!, $after: String, $query: String, $sortKey: CustomerSortKeys) {
+  customers(first: $first, after: $after, query: $query, sortKey: $sortKey, reverse: false) {
+    nodes {
+      id
+      firstName
+      lastName
+      defaultEmailAddress { emailAddress }
+      defaultPhoneNumber { phoneNumber }
+      note
+      tags
+      taxExempt
+      state
+      createdAt
+      updatedAt
+    }
+    pageInfo { hasNextPage endCursor }
+  }
+}

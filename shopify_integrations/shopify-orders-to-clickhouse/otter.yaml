@@ -1,0 +1,130 @@
+version: 1
+
+name: shopify-orders-to-clickhouse
+description: Read changed Shopify orders into Castor's shopify_orders table every five minutes.
+
+entrypoint: main.py
+
+# Managed Python: Otter prepares a pinned interpreter and the locked
+# dependencies before activation, so the host needs no Python of its own and a
+# run cannot drift when the host is upgraded.
+#
+# The three files this mode requires sit next to this manifest:
+#   .python-version   the exact CPython patch version to prepare
+#   pyproject.toml    project metadata and dependencies (none)
+#   uv.lock           the locked resolution of the above
+#
+# `python.executable` is deliberately absent: managed mode rejects it, because
+# the interpreter is prepared rather than named.
+python:
+  mode: managed
+
+  # The Shopify and ClickHouse clients live outside this integration, in
+  # lib/python, so a second integration can import them instead of copying them.
+  # In managed mode this directory is captured into the release at the same
+  # relative depth, which means a run imports the shared code that was
+  # snapshotted with its release rather than whatever is on disk now.
+  path:
+    - ../lib/python
+
+# The schedule is runtime state, and this field is only its first value: Otter
+# imports it once, on first sight of the job, and ignores it from then on.
+# Change the cadence with `otter schedule set '*/15 * * * *'` or
+# `PUT /v1/jobs/shopify-orders-to-clickhouse/schedule` from here on.
+trigger:
+  cron: "*/5 * * * *"
+
+# A five minute interval with a 300s ceiling means a single run can never
+# overrun its own schedule; RUN_BUDGET_SECONDS stops it early with a resumable
+# checkpoint instead of being killed mid-page.
+timeout: 300
+
+# One at a time. Overlapping runs would fight over the same cursor.
+concurrency: 1
+
+# Deliberately short: a retry has to land inside the next tick, otherwise
+# failures pile runs up in the queue. Because the sync is watermark-based and
+# the destination is keyed by Shopify's own ids, a redundant run is a no-op that
+# rewrites the same rows.
+retry:
+  attempts: 3
+  backoff: exponential
+  initial_delay: 30s
+  max_delay: 2m
+
+# Non-secret, deployment-specific settings only.
+#
+# IMPORTANT: `otter inspect` and `GET /v1/jobs` print these values, so never put
+# a token or password here -- use the secrets list below.
+env:
+  # Your *.myshopify.com domain (Shopify Admin API host). The same dev store the
+  # sibling integration syncs, so one Shopify app serves both jobs.
+  SHOPIFY_STORE: robin-dev-3.myshopify.com
+  # Pin an Admin API version your store supports and bump it deliberately.
+  SHOPIFY_API_VERSION: "2026-07"
+
+  # The ClickHouse HTTP endpoint, scheme/host/port only. The database is a
+  # separate setting and the credentials are headers, so nothing secret is in
+  # this value.
+  #
+  # The hostname the Castor application itself uses: the Docker ClickHouse in
+  # castor-app, published through a named Cloudflare Tunnel and guarded by
+  # Cloudflare Access. A runtime on that same machine could reach it directly at
+  # http://127.0.0.1:8123 and skip Access entirely, but the tunnel is what a
+  # runtime anywhere else -- an EC2 host, say -- needs, and it exercises the same
+  # path Castor does.
+  CLICKHOUSE_URL: https://clickhouse-dev.castorhq.com
+
+  # Castor's database, not a parallel one: the pilot's whole point is that the
+  # rows land where Castor reads them. The table already exists there -- this
+  # integration creates no schema.
+  CLICKHOUSE_DATABASE: castor
+  CLICKHOUSE_ORDERS_TABLE: shopify_orders
+
+  # Which Castor dataset these rows belong to: the same three values the Lambda
+  # receives on its SQS message, read from Castor's control database.
+  #
+  #   workspace   the prototype workspace castor-infra-stack.ts pins for every
+  #               Lambda (castor-app/infra/lib/castor-infra-stack.ts)
+  #   connection  the Shopify connection for robin-dev-3.myshopify.com
+  #   dataset     the `orders` dataset on that connection, whose
+  #               destination_table is shopify_orders
+  #
+  # They lead the sort key of the destination table, so they are part of the
+  # deduplication key. A malformed one fails the insert; a valid one naming the
+  # wrong dataset files every order under it silently.
+  CASTOR_WORKSPACE_ID: "00000000-0000-0000-0000-000000000001"
+  CASTOR_CONNECTION_ID: "cb7c18ef-cb9c-45ac-a8c3-75d719b09763"
+  CASTOR_DATASET_ID: "d13707a7-30a6-46fa-b71c-13594d943153"
+
+  # Where the very first run starts scanning from, and how far back a run first
+  # looks when BACKFILL_FROM is unset.
+  BACKFILL_FROM: "2026-01-01T00:00:00Z"
+  BACKFILL_DAYS: "30"
+
+  # Stop early rather than being killed at the manifest timeout, so progress is
+  # checkpointed and the next tick resumes.
+  RUN_BUDGET_SECONDS: "240"
+  PAGE_SIZE: "100"
+  MAX_PAGES_PER_RUN: "20"
+  OVERLAP_SECONDS: "600"
+
+# Required. Otter reads these from the *daemon's* environment and refuses to
+# start Python if any is missing, so a typo fails fast instead of halfway
+# through a sync.
+#
+# Shopify uses the client credentials grant: the app exchanges its own client id
+# and secret for a 24 hour access token, which the client renews per run. There
+# is no long-lived Shopify token to paste anywhere.
+secrets:
+  - SHOPIFY_CLIENT_ID
+  - SHOPIFY_CLIENT_SECRET
+  - CLICKHOUSE_USER
+  - CLICKHOUSE_PASSWORD
+  # The Cloudflare Access service token for the tunnel above. Required, because
+  # the endpoint is behind Access: without them every request is refused with a
+  # 403 by Cloudflare before ClickHouse sees it, which reads like a database
+  # problem rather than a missing credential. A direct, untunnelled endpoint
+  # would omit these two lines and the client would send no Access headers.
+  - CLICKHOUSE_ACCESS_CLIENT_ID
+  - CLICKHOUSE_ACCESS_CLIENT_SECRET

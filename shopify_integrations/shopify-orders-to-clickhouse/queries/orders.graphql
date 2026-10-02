@@ -1,0 +1,28 @@
+query CastorOrders($first: Int!, $after: String, $query: String, $sortKey: OrderSortKeys) {
+  orders(first: $first, after: $after, query: $query, sortKey: $sortKey, reverse: false) {
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      id name email phone tags test createdAt processedAt updatedAt cancelledAt closedAt
+      displayFinancialStatus displayFulfillmentStatus currencyCode
+      customer {
+        id firstName lastName
+        defaultEmailAddress { emailAddress }
+        defaultPhoneNumber { phoneNumber }
+      }
+      currentSubtotalPriceSet { shopMoney { amount } }
+      currentTotalDiscountsSet { shopMoney { amount } }
+      currentShippingPriceSet { shopMoney { amount } }
+      currentTotalTaxSet { shopMoney { amount } }
+      currentTotalPriceSet { shopMoney { amount currencyCode } }
+      totalRefundedSet { shopMoney { amount } }
+      shippingAddress {
+        name company phone address1 address2 city province provinceCode zip
+        country countryCodeV2 latitude longitude
+      }
+      billingAddress {
+        name company phone address1 address2 city province provinceCode zip
+        country countryCodeV2
+      }
+    }
+  }
+}

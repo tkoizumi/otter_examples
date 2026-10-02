@@ -1,0 +1,26 @@
+# Managed-mode project metadata.
+#
+# `otter prepare` installs this project's dependencies into a prepared
+# environment using `uv sync --locked`, so `uv.lock` must be committed and kept
+# in step with this file. Otter never updates the lock implicitly: a stale lock
+# is an error, not something to resolve behind your back.
+#
+# There are no dependencies, and that is deliberate. This integration and the
+# shared `lib/python/otter_connectors` package are stdlib-only: Shopify is
+# reached with urllib, and ClickHouse through its HTTP interface, so the client
+# is about eighty lines rather than a driver. The prepared interpreter on Linux
+# has a system CA store, so the `certifi` fallback in otter_connectors.http does
+# not apply here.
+#
+# Adding a dependency means adding it here and re-running `uv lock`. Managed
+# Python installs wheels only, so a dependency without one for the target
+# platform fails clearly at release time instead of building from source.
+
+[project]
+name = "shopify-customers-to-clickhouse"
+version = "0.1.0"
+description = "Read changed Shopify customers into ClickHouse"
+# The prepared interpreter is pinned exactly in .python-version; this is the
+# range the code is written against.
+requires-python = ">=3.10"
+dependencies = []
