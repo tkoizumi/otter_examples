@@ -27,6 +27,7 @@ An ``overrides`` keyword forwards anything the caller computed itself, such as
 an API version from a command line flag.
 """
 
+from .clickhouse import ClickHouseClient
 from .config import env
 from .errors import ConfigError
 from .salesforce import DEFAULT_API_VERSION as SALESFORCE_API_VERSION
@@ -34,7 +35,7 @@ from .salesforce import SalesforceClient
 from .shopify import DEFAULT_API_VERSION as SHOPIFY_API_VERSION
 from .shopify import ShopifyClient
 
-__all__ = ["salesforce_client", "shopify_client"]
+__all__ = ["clickhouse_client", "salesforce_client", "shopify_client"]
 
 
 def shopify_client(store, get=env, **overrides):
@@ -77,6 +78,38 @@ def salesforce_client(instance_url, get=env, **overrides):
     settings.update(overrides)
     settings["instance_url"] = instance_url
     return SalesforceClient(**settings)
+
+
+def clickhouse_client(get=env, **overrides):
+    """A ``ClickHouseClient`` from the standard ``CLICKHOUSE_*`` settings.
+
+    Unlike the Shopify and Salesforce factories this takes no target argument: a
+    ClickHouse endpoint is identified entirely by its URL, so the URL is a
+    setting rather than something the caller names. It is required, and a
+    missing one fails here rather than as a connection error halfway through a
+    sync.
+
+    Credentials are headers, never part of the URL, so they cannot leak through
+    a log line that quotes the endpoint.
+    """
+    url = overrides.pop("url", None) or get("CLICKHOUSE_URL")
+    if not url:
+        raise ConfigError("CLICKHOUSE_URL is not set")
+
+    settings = {
+        "database": get("CLICKHOUSE_DATABASE", "default"),
+        "username": get("CLICKHOUSE_USER"),
+        "password": get("CLICKHOUSE_PASSWORD"),
+        # A Cloudflare Access service token, for an endpoint published through a
+        # tunnel. Absent for a direct connection, which is why they are optional
+        # here -- but the client refuses one without the other.
+        "access_client_id": get("CLICKHOUSE_ACCESS_CLIENT_ID"),
+        "access_client_secret": get("CLICKHOUSE_ACCESS_CLIENT_SECRET"),
+        "timeout": _int(get, "CLICKHOUSE_TIMEOUT_SECONDS", 60),
+    }
+    settings.update(overrides)
+    settings["url"] = url
+    return ClickHouseClient(**settings)
 
 
 def _int(get, name, default):
