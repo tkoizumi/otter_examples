@@ -1,4 +1,4 @@
-# shopify-to-clickhouse
+# shopify-products-to-clickhouse
 
 Reads every Shopify product changed since the last run, with its variants, and
 upserts them into **Castor's own ClickHouse tables**, `shopify_products` and
@@ -107,7 +107,7 @@ which is why no credential belongs here.
 ## Running it
 
 ```bash
-cd shopify_integrations/shopify-to-clickhouse
+cd shopify_integrations/shopify-products-to-clickhouse
 
 # 1. Check the manifest. Local, no daemon, and it catches a bad python.path, a
 #    malformed env block or a non-UUID tenant id before anything else.
@@ -126,7 +126,7 @@ Then either run it on demand or give it a cadence:
 
 ```bash
 otter run .
-otter schedule set '*/15 * * * *'     # or PUT /v1/jobs/shopify-to-clickhouse/schedule
+otter schedule set '*/15 * * * *'     # or PUT /v1/jobs/shopify-products-to-clickhouse/schedule
 otter schedule show
 ```
 
@@ -163,7 +163,7 @@ LIMIT 10;
 What the integration records about itself is in `ctx.state`, readable with:
 
 ```bash
-otter state get shopify-to-clickhouse last_run
+otter state get shopify-products-to-clickhouse last_run
 ```
 
 It holds the page count, how many products and variants were fetched and written,

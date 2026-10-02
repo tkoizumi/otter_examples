@@ -1,7 +1,7 @@
 version: 1
 
 name: shopify-customers-to-clickhouse
-description: Read changed Shopify customers into Castor's shopify_customers table every five minutes.
+description: Read changed Shopify customers into Castor's shopify_customers table.
 
 entrypoint: main.py
 

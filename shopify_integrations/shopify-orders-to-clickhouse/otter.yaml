@@ -1,7 +1,7 @@
 version: 1
 
 name: shopify-orders-to-clickhouse
-description: Read changed Shopify orders into Castor's shopify_orders table every five minutes.
+description: Read changed Shopify orders into Castor's shopify_orders table.
 
 entrypoint: main.py
 

@@ -17,7 +17,7 @@
 # platform fails clearly at release time instead of building from source.
 
 [project]
-name = "shopify-to-clickhouse"
+name = "shopify-products-to-clickhouse"
 version = "0.1.0"
 description = "Upsert Shopify products and variants into ClickHouse"
 # The prepared interpreter is pinned exactly in .python-version; this is the

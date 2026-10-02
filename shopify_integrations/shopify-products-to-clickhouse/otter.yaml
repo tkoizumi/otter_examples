@@ -1,7 +1,7 @@
 version: 1
 
-name: shopify-to-clickhouse
-description: Upsert Shopify products and variants into ClickHouse every five minutes.
+name: shopify-products-to-clickhouse
+description: Upsert Shopify products and variants into ClickHouse.
 
 entrypoint: main.py
 
@@ -30,7 +30,7 @@ python:
 # The schedule is runtime state, and this field is only its first value: Otter
 # imports it once, on first sight of the job, and ignores it from then on.
 # Change the cadence with `otter schedule set '*/15 * * * *'` or
-# `PUT /v1/jobs/shopify-to-clickhouse/schedule` from here on.
+# `PUT /v1/jobs/shopify-products-to-clickhouse/schedule` from here on.
 trigger:
   cron: "*/5 * * * *"
 
