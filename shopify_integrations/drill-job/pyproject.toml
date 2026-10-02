@@ -1,0 +1,6 @@
+[project]
+name = "drill-job"
+version = "0.0.0"
+description = "P0-03 clean-host drill job"
+requires-python = ">=3.10"
+dependencies = []

@@ -1,0 +1,19 @@
+version: 1
+
+name: drill-job
+description: P0-03 clean-host drill job. Needs no secret, and is safe to run repeatedly.
+
+entrypoint: main.py
+
+# Managed Python, like the real integrations, so the drill exercises the
+# prepared-environment half of the backup and not just the database.
+python:
+  mode: managed
+
+# Deliberately no `trigger:`. This job is run on demand by the drill and must
+# never fire on a schedule of its own.
+timeout: 60
+concurrency: 1
+retry:
+  attempts: 1
+  backoff: none
